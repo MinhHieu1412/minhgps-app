@@ -28,50 +28,7 @@ Future<void> exportToDXF(BuildContext context, List<LandPoint> points, String se
   );
 
   try {
-    double centerLat = 0;
-    double centerLon = 0;
-    for (var p in points) {
-      centerLat += p.position.latitude;
-      centerLon += p.position.longitude;
-    }
-    centerLat /= points.length;
-    centerLon /= points.length;
-
     double l0 = VN2000Converter.provinces[selectedProvince]!;
-
-    String query = '''
-      [out:json][timeout:25];
-      (
-        way["highway"](around:500,$centerLat,$centerLon);
-        way["building"](around:500,$centerLat,$centerLon);
-        way["waterway"](around:500,$centerLat,$centerLon);
-        way["natural"="water"](around:500,$centerLat,$centerLon);
-      );
-      out geom;
-    ''';
-    
-    var response = await http.post(
-      Uri.parse('https://overpass-api.de/api/interpreter'),
-      body: {'data': query},
-      headers: {'User-Agent': 'MinhGPS/1.0'},
-    );
-
-    List<List<List<double>>> mapWays = []; 
-
-    if (response.statusCode == 200) {
-      var data = jsonDecode(response.body);
-      var elements = data['elements'] as List;
-      for (var el in elements) {
-        if (el['type'] == 'way' && el['geometry'] != null) {
-          List<List<double>> wayPts = [];
-          for (var pt in el['geometry']) {
-            var vn2000 = VN2000Converter.wgs84ToVn2000(pt['lat'], pt['lon'], l0);
-            wayPts.add(vn2000);
-          }
-          mapWays.add(wayPts);
-        }
-      }
-    }
 
     StringBuffer dxf = StringBuffer();
     void writePair(int code, dynamic val) {
@@ -94,13 +51,7 @@ TABLE
   2
 LAYER
   70
-5
-  0
-LAYER
-  2
-MAP_500M
-  62
-8
+4
   0
 LAYER
   2
@@ -134,18 +85,6 @@ SECTION
   2
 ENTITIES
 ''');
-
-    for (var way in mapWays) {
-      if (way.length < 2) continue;
-      for (int i = 0; i < way.length - 1; i++) {
-        writePair(0, 'LINE');
-        writePair(8, 'MAP_500M');
-        writePair(10, way[i][0]);
-        writePair(20, way[i][1]);
-        writePair(11, way[i+1][0]);
-        writePair(21, way[i+1][1]);
-      }
-    }
 
     var allBranches = points.map((e) => e.branchName).toSet().toList();
     for (var branch in allBranches) {

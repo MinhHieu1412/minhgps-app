@@ -20,6 +20,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
+import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 import 'dxf_export.dart';
 
 void main() {
@@ -425,21 +427,29 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  Future<void> _takePictureForPoint(int index) async {
+  Future<void> _takePictureForPoint(int index, String name, String segmentName) async {
+    final point = _points[index];
+    final String clipText = "${point.position.latitude.toStringAsFixed(6)}N ${point.position.longitude.toStringAsFixed(6)}E\n"
+                            "${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}\n"
+                            "${segmentName}\n"
+                            "#${name}";
+    await Clipboard.setData(ClipboardData(text: clipText));
+    _showSnackBar('Đã copy thông tin! Hãy dán (Paste) vào app Camera của bạn.', duration: const Duration(seconds: 4));
+
     final ImagePicker picker = ImagePicker();
     try {
       final XFile? photo = await picker.pickImage(source: ImageSource.camera);
       if (photo != null) {
         final directory = await getApplicationDocumentsDirectory();
         final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final savedImage = File('${directory.path}/${_points[index].name}_$timestamp.jpg');
+        final savedImage = File('${directory.path}/${name}_$timestamp.jpg');
         await File(photo.path).copy(savedImage.path);
         
         setState(() {
           _points[index].imagePath = savedImage.path;
           _saveData();
         });
-        _showSnackBar('Đã lưu ảnh cho điểm ${_points[index].name}');
+        _showSnackBar('Đã lưu ảnh cho điểm ${name}');
       }
     } catch (e) {
       _showSnackBar('Lỗi khi chụp ảnh: $e');
@@ -495,15 +505,16 @@ class _MapScreenState extends State<MapScreen> {
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () {
+                          if (nameController.text.trim().isEmpty || branchController.text.trim().isEmpty || segmentController.text.trim().isEmpty) {
+                            _showSnackBar('Vui lòng nhập đầy đủ Tên điểm, Nhánh và Lộ dây trước khi chụp ảnh!');
+                            return;
+                          }
                           Navigator.pop(context);
-                          _takePictureForPoint(index);
+                          _takePictureForPoint(index, nameController.text.trim(), segmentController.text.trim());
                         },
                         icon: const Icon(Icons.camera_alt),
-                        label: const Text('Chụp ảnh'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
-                          foregroundColor: Colors.white,
-                        ),
+                        label: const Text('Chụp ảnh', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
                       ),
                     ),
                   ],
@@ -512,8 +523,60 @@ class _MapScreenState extends State<MapScreen> {
                 if (_points[index].imagePath != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: Text('Đã có ảnh đính kèm', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Đã có ảnh đính kèm', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                        const SizedBox(width: 10),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
+                          onPressed: () async {
+                            final path = _points[index].imagePath!;
+                            if (File(path).existsSync()) {
+                              showDialog(
+                                context: context, 
+                                builder: (c) => Dialog(
+                                  child: Stack(
+                                    children: [
+                                      Image.file(File(path)),
+                                      Positioned(
+                                        right: 0,
+                                        top: 0,
+                                        child: IconButton(
+                                          icon: const Icon(Icons.close, color: Colors.red, size: 30),
+                                          onPressed: () => Navigator.pop(c),
+                                        )
+                                      )
+                                    ]
+                                  )
+                                )
+                              );
+                            } else {
+                              _showSnackBar('Không tìm thấy file ảnh');
+                            }
+                          },
+                          child: const Text('Xem ảnh'),
+                        )
+                      ],
+                    ),
                   ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      _showNotesDialog(index);
+                    },
+                    icon: const Icon(Icons.note_add),
+                    label: const Text('Bảng ghi chú', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(45),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 ElevatedButton.icon(
                   onPressed: () {
                     Navigator.pop(context);
@@ -749,18 +812,16 @@ class _MapScreenState extends State<MapScreen> {
 
           int numCircles = 0;
           int numSquares = 0;
-          // Chỉ tính những ký hiệu cơ bản, KHÔNG tính các hình có tam giác đỏ
-          if (!p.shapeType.contains('tg đỏ')) {
-            if (p.shapeType.contains('2 tròn')) {
-              numCircles = 2;
-            } else if (p.shapeType.contains('1 tròn')) {
-              numCircles = 1;
-            }
-            if (p.shapeType.contains('2 vuông')) {
-              numSquares = 2;
-            } else if (p.shapeType.contains('1 vuông')) {
-              numSquares = 1;
-            }
+          
+          if (p.shapeType.contains('cột đôi tròn')) {
+            numCircles = 2;
+          } else if (p.shapeType.contains('cột tròn')) {
+            numCircles = 1;
+          }
+          if (p.shapeType.contains('cột đôi')) {
+            numSquares = 2;
+          } else if (p.shapeType.contains('cột vuông')) {
+            numSquares = 1;
           }
 
           String imageName = p.imagePath != null ? p.imagePath!.split('/').last.split('\\').last : "";
@@ -788,7 +849,7 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  Future<void> _exportToKML() async {
+  Future<void> _exportToKMZ() async {
     if (_points.isEmpty) {
       _showSnackBar('Chưa có dữ liệu để xuất.');
       return;
@@ -813,17 +874,30 @@ class _MapScreenState extends State<MapScreen> {
     kml.writeln('<Document>');
     kml.writeln('  <name>Du Lieu Do Dat - $modeDisplayName</name>');
 
+    var archive = Archive();
+
     for (var p in _points) {
       kml.writeln('  <Placemark>');
       kml.writeln('    <name>${p.name} (${p.branchName})</name>');
       
+      kml.writeln('    <description><![CDATA[');
       String notesStr = p.notes.where((n) => n.trim().isNotEmpty).join(', ');
-      if (notesStr.isNotEmpty || p.imagePath != null) {
-        kml.writeln('    <description>');
-        if (notesStr.isNotEmpty) kml.writeln('      Ghi chú: $notesStr');
-        if (p.imagePath != null) kml.writeln('      Ảnh: ${p.imagePath!.split('/').last.split('\\').last}');
-        kml.writeln('    </description>');
+      if (notesStr.isNotEmpty) kml.writeln('      Ghi chú: $notesStr <br/>');
+      if (p.imagePath != null && File(p.imagePath!).existsSync()) {
+        String fileName = p.imagePath!.split('/').last.split('\\').last;
+        kml.writeln('      <img src="images/$fileName" width="400" /><br/>');
+        List<int> imageBytes = File(p.imagePath!).readAsBytesSync();
+        archive.addFile(ArchiveFile('images/$fileName', imageBytes.length, imageBytes));
       }
+      kml.writeln('    ]]></description>');
+
+      kml.writeln('    <ExtendedData>');
+      for (int i = 0; i < p.notes.length; i++) {
+        if (p.notes[i].trim().isNotEmpty) {
+          kml.writeln('      <Data name="GhiChu_${i+1}"><value>${p.notes[i]}</value></Data>');
+        }
+      }
+      kml.writeln('    </ExtendedData>');
 
       kml.writeln('    <Point>');
       kml.writeln('      <coordinates>${p.position.longitude},${p.position.latitude},0</coordinates>');
@@ -888,12 +962,16 @@ class _MapScreenState extends State<MapScreen> {
     kml.writeln('</Document>');
     kml.writeln('</kml>');
 
-    final directory = await getTemporaryDirectory();
-    final path = '${directory.path}/du_lieu_do_dat_$modeFileName.kml';
-    final file = File(path);
-    await file.writeAsString(kml.toString());
+    List<int> kmlBytes = utf8.encode(kml.toString());
+    archive.addFile(ArchiveFile('doc.kml', kmlBytes.length, kmlBytes));
+    List<int>? kmzBytes = ZipEncoder().encode(archive);
 
-    await Share.shareXFiles([XFile(path)], text: 'File Google Earth (KML) dữ liệu đo đạc ($modeDisplayName)');
+    final directory = await getTemporaryDirectory();
+    final path = '${directory.path}/du_lieu_do_dat_$modeFileName.kmz';
+    final file = File(path);
+    await file.writeAsBytes(kmzBytes!);
+
+    await Share.shareXFiles([XFile(path)], text: 'File Google Earth (KMZ) dữ liệu đo đạc ($modeDisplayName)');
   }
 
   Future<void> _exportToDXFUI() async {
@@ -955,9 +1033,9 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _showSnackBar(String message) {
+  void _showSnackBar(String message, {Duration duration = const Duration(seconds: 2)}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(content: Text(message), duration: duration),
     );
   }
 
@@ -1164,16 +1242,16 @@ class _MapScreenState extends State<MapScreen> {
                 const Text('• Mũi tên (Undo): Xóa điểm vừa chấm.\n• Thùng rác: Xóa sạch bản vẽ.\n• Cành cây (Tạo Nhánh): Tách đường nhánh phụ (không dính líu vào đường Chính).', style: TextStyle(fontSize: 13)),
                 const SizedBox(height: 12),
                 const Text('3. KÝ HIỆU HÌNH HỌC THÔNG MINH\n(Nhấn giữ vào điểm để hiện Menu)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
-                const Text('A. Ký hiệu cơ bản (Màu Xanh Lam):\n- 1 tròn / 1 vuông.\n- 2 tròn/vuông dọc: Xoay bám sát đường thẳng.\n- 2 tròn/vuông ngang: Xoay vuông góc 90 độ.\n\nB. Ký hiệu phức hợp (Đỏ, Phóng to x3):\n- Vuông tg đỏ: Vuông đỏ chứa tam giác đặc đỏ.\n- Vuông tg đỏ 2 tròn: Có thêm 2 vòng tròn ép sát ở sườn.\n- Vuông tg đỏ 1 tròn: Thêm 1 vòng tròn dưới đáy.', style: TextStyle(fontSize: 13)),
+                const Text('Các ký hiệu cột/trạm được chọn tại menu điểm.', style: TextStyle(fontSize: 13)),
                 const SizedBox(height: 12),
                 const Text('4. NHẬP GHI CHÚ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
-                const Text('• Bạn có 7 hàng kẻ để điền thông tin.\n• Máy sẽ tự chèn khoảng trắng cho đủ 15 ký tự mỗi dòng khi xuất Excel.', style: TextStyle(fontSize: 13)),
+                const Text('• Sử dụng Bảng Ghi Chú để nhập liệu.\n• Có thể đính kèm ảnh chụp có thông tin tọa độ.', style: TextStyle(fontSize: 13)),
                 const SizedBox(height: 12),
                 const Text('5. BẢNG THỐNG KÊ (VUỐT LÊN)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
                 const Text('• Diện tích khép kín đường Chính.\n• Tổng chiều dài các đường nhánh.', style: TextStyle(fontSize: 13)),
                 const SizedBox(height: 12),
-                const Text('6. XUẤT EXCEL (CSV CỰC CHUẨN)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
-                const Text('• Bấm nút Chia sẻ (Góc phải dưới).\n• Tự động xuất Tọa độ VN2000.\n• Tự động đếm "Số Đường Tròn" & "Số Hình Vuông" CƠ BẢN. Hệ thống thông minh tự ĐỘNG BỎ QUA không đếm các ký hiệu có tam giác đỏ.', style: TextStyle(fontSize: 13)),
+                const Text('6. XUẤT EXCEL & KMZ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
+                const Text('• Xuất CSV hỗ trợ VN2000 và tính toán tự động.\n• Xuất KMZ để xem trực tiếp trên Google Earth.', style: TextStyle(fontSize: 13)),
               ],
             ),
           ),
@@ -1234,8 +1312,9 @@ class _MapScreenState extends State<MapScreen> {
       }
     );
   }
+
   void _showShapeSelectionPanel(int index) {
-    final List<String> shapes = ['none', '1 tròn', '1 vuông', '2 tròn ngang', '2 tròn dọc', '2 vuông ngang', '2 vuông dọc', 'vuông tg đỏ', 'vuông tg đỏ 1 tròn', 'vuông tg đỏ 2 tròn'];
+    final List<String> shapes = ['none', 'cột tròn', 'cột vuông', 'cột đôi tròn ngang', 'cột đôi dọc', 'cột đôi V-N', 'cột đôi V-D', 'trạm hợp bộ', 'trạm 1 cột', 'trạm treo'];
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -1244,7 +1323,7 @@ class _MapScreenState extends State<MapScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Tùy Chỉnh Ký Hiệu & Ghi Chú', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text('Tùy Chỉnh Ký Hiệu', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
@@ -1263,16 +1342,6 @@ class _MapScreenState extends State<MapScreen> {
                   },
                 )).toList(),
               ),
-              const Divider(height: 24),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context); // Đóng panel chọn hình
-                  _showNoteDialog(index); // Mở bảng ghi chú (Bảng trống)
-                },
-                icon: const Icon(Icons.edit_document),
-                label: const Text('Mở Bảng Trống (Ghi chú 7 dòng)'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),
-              )
             ],
           ),
         );
@@ -1921,31 +1990,31 @@ class ShapePainter extends CustomPainter {
     canvas.rotate(angle);
 
     switch (shapeType) {
-      case '1 tròn':
+      case 'cột tròn':
         canvas.drawCircle(Offset.zero, r, paint);
         break;
-      case '1 vuông':
+      case 'cột vuông':
         canvas.drawRect(Rect.fromCenter(center: Offset.zero, width: r * 2, height: r * 2), paint);
         break;
-      case '2 tròn ngang':
+      case 'cột đôi tròn ngang':
         canvas.drawCircle(Offset(0, -spacing), r, paint);
         canvas.drawCircle(Offset(0, spacing), r, paint);
         break;
-      case '2 tròn dọc':
+      case 'cột đôi dọc':
         canvas.drawCircle(Offset(-spacing, 0), r, paint);
         canvas.drawCircle(Offset(spacing, 0), r, paint);
         break;
-      case '2 vuông ngang':
+      case 'cột đôi V-N':
         canvas.drawRect(Rect.fromCenter(center: Offset(0, -spacing), width: r * 2, height: r * 2), paint);
         canvas.drawRect(Rect.fromCenter(center: Offset(0, spacing), width: r * 2, height: r * 2), paint);
         break;
-      case '2 vuông dọc':
+      case 'cột đôi V-D':
         canvas.drawRect(Rect.fromCenter(center: Offset(-spacing, 0), width: r * 2, height: r * 2), paint);
         canvas.drawRect(Rect.fromCenter(center: Offset(spacing, 0), width: r * 2, height: r * 2), paint);
         break;
-      case 'vuông tg đỏ':
-      case 'vuông tg đỏ 1 tròn':
-      case 'vuông tg đỏ 2 tròn':
+      case 'trạm hợp bộ':
+      case 'trạm 1 cột':
+      case 'trạm treo':
         final r2 = 12.0; // To gấp 3 lần (bình thường là 4.0)
         final strokePaint = Paint()
           ..color = Colors.red
@@ -1969,11 +2038,11 @@ class ShapePainter extends CustomPainter {
         // Vẽ vòng tròn viền đỏ
         final circleR = r2 * 0.4; // Đường kính gần bằng 1/3 cạnh
         
-        if (shapeType == 'vuông tg đỏ 2 tròn') {
+        if (shapeType == 'trạm treo') {
           // 2 vòng tròn 2 bên mép trái, phải (ở giữa theo chiều dọc)
           canvas.drawCircle(Offset(-r2 - circleR, 0), circleR, strokePaint); // Trái
           canvas.drawCircle(Offset(r2 + circleR, 0), circleR, strokePaint); // Phải
-        } else if (shapeType == 'vuông tg đỏ 1 tròn') {
+        } else if (shapeType == 'trạm 1 cột') {
           // 1 vòng tròn ở mép dưới (ở giữa theo chiều ngang)
           canvas.drawCircle(Offset(0, r2 + circleR), circleR, strokePaint); // Dưới
         }
