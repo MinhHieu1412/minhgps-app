@@ -1,0 +1,42 @@
+name: iOS Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Cho phép bạn bấm nút chạy thủ công trên GitHub
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          # Tự động lấy phiên bản Flutter mới nhất
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build iOS App (No Codesign)
+        # Sử dụng tham số --no-codesign vì chúng ta không có Chứng chỉ Apple Developer ở bước này
+        run: flutter build ios --release --no-codesign
+
+      - name: Create IPA payload
+        # Đóng gói thư mục .app thành file .ipa
+        run: |
+          mkdir -p Payload
+          mv build/ios/iphoneos/Runner.app Payload
+          zip -r -q MINHGPS_iOS.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MINHGPS-iOS-App
+          path: MINHGPS_iOS.ipa
