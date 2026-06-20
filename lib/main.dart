@@ -18,6 +18,7 @@ import 'package:xml/xml.dart' as xml;
 import 'package:archive/archive.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'dxf_export.dart';
 
@@ -115,6 +116,7 @@ class _MapScreenState extends State<MapScreen> {
   ll.LatLng? _currentLocation;
   double _calculatedAreaSqMeters = 0.0;
   bool _isLoadingLocation = false;
+  AlignOnUpdate _alignPositionOnUpdate = AlignOnUpdate.never;
   
   int? _movingPointIndex;
   String _currentBranch = 'Chính';
@@ -226,6 +228,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _getCurrentLocation() async {
     setState(() {
+      _alignPositionOnUpdate = AlignOnUpdate.always;
       _isLoadingLocation = true;
     });
     try {
@@ -1464,6 +1467,11 @@ class _MapScreenState extends State<MapScreen> {
               initialZoom: 6.0,
               onTap: (tapPosition, point) => _handleMapTap(point),
               onPositionChanged: (camera, hasGesture) {
+                if (hasGesture && _alignPositionOnUpdate == AlignOnUpdate.always) {
+                  setState(() {
+                    _alignPositionOnUpdate = AlignOnUpdate.never;
+                  });
+                }
                 if (_movingPointIndex != null && hasGesture) {
                   setState(() {
                     _points[_movingPointIndex!].position = camera.center!;
@@ -1477,7 +1485,13 @@ class _MapScreenState extends State<MapScreen> {
                 urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                 userAgentPackageName: 'com.example.land_area_app',
               ),
-              CurrentLocationLayer(),
+              CurrentLocationLayer(
+                alignPositionOnUpdate: _alignPositionOnUpdate,
+                headingStream: FlutterCompass.events?.map((CompassEvent e) => LocationMarkerHeading(
+                  heading: (e.heading ?? 0) * (math.pi / 180),
+                  accuracy: (e.accuracy ?? 0) * (math.pi / 180),
+                )),
+              ),
               if (_currentMode == AppMode.area && mainPolygonPoints.isNotEmpty)
                 PolygonLayer(
                   polygons: [
