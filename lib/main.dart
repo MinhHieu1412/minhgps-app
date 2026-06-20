@@ -18,6 +18,7 @@ import 'package:xml/xml.dart' as xml;
 import 'package:archive/archive.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'dxf_export.dart';
 
 void main() {
@@ -1476,6 +1477,7 @@ class _MapScreenState extends State<MapScreen> {
                 urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                 userAgentPackageName: 'com.example.land_area_app',
               ),
+              CurrentLocationLayer(),
               if (_currentMode == AppMode.area && mainPolygonPoints.isNotEmpty)
                 PolygonLayer(
                   polygons: [
