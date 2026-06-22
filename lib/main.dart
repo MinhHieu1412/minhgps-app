@@ -22,6 +22,9 @@ import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
+import 'package:geocoding/geocoding.dart' as geocoding;
+import 'package:screenshot/screenshot.dart';
+import 'dart:ui' as ui;
 import 'dxf_export.dart';
 
 void main() {
@@ -549,20 +552,112 @@ class _MapScreenState extends State<MapScreen> {
     try {
       final XFile? photo = await picker.pickImage(source: ImageSource.camera);
       if (photo != null) {
-        final directory = await getApplicationDocumentsDirectory();
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final savedImage = File('${directory.path}/${name}_$timestamp.jpg');
-        await File(photo.path).copy(savedImage.path);
-        
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 20),
+                Expanded(child: Text('Đang xử lý và chèn thông tin vào ảnh...')),
+              ],
+            ),
+          ),
+        );
+
+        File watermarkedFile = await _addWatermark(File(photo.path), point, name);
+
+        if (context.mounted) Navigator.pop(context); // close dialog
+
         setState(() {
-          _points[index].imagePath = savedImage.path;
+          _points[index].imagePath = watermarkedFile.path;
           _saveData();
         });
         _showSnackBar('Đã lưu ảnh cho điểm ${name}');
       }
     } catch (e) {
+      if (context.mounted) Navigator.pop(context); // close dialog on error
       _showSnackBar('Lỗi khi chụp ảnh: $e');
     }
+  }
+
+  Future<File> _addWatermark(File imageFile, LandPoint point, String name) async {
+    String address = '';
+    try {
+      List<geocoding.Placemark> placemarks = await geocoding.placemarkFromCoordinates(point.position.latitude, point.position.longitude);
+      if (placemarks.isNotEmpty) {
+        geocoding.Placemark place = placemarks.first;
+        address = place.street ?? place.name ?? '';
+      }
+    } catch (e) {
+      // ignore geocoding errors
+    }
+
+    final Uint8List bytes = await imageFile.readAsBytes();
+    final ui.Image decodedImage = await decodeImageFromList(bytes);
+    double imgWidth = decodedImage.width.toDouble();
+    double imgHeight = decodedImage.height.toDouble();
+    
+    double targetWidth = imgWidth > 1920 ? 1920 : imgWidth;
+    double scale = targetWidth / imgWidth;
+    double targetHeight = imgHeight * scale;
+
+    final textStyle = TextStyle(
+      color: Colors.white,
+      fontSize: targetWidth * 0.03, // Responsive font size
+      fontWeight: FontWeight.bold,
+      shadows: const [
+        Shadow(offset: Offset(-2, -2), color: Colors.black),
+        Shadow(offset: Offset(2, -2), color: Colors.black),
+        Shadow(offset: Offset(2, 2), color: Colors.black),
+        Shadow(offset: Offset(-2, 2), color: Colors.black),
+      ],
+    );
+
+    Widget watermarkWidget = Directionality(
+      textDirection: TextDirection.ltr,
+      child: Container(
+        width: targetWidth,
+        height: targetHeight,
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: MemoryImage(bytes),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              bottom: targetHeight * 0.02,
+              right: targetWidth * 0.02,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('${point.position.latitude.toStringAsFixed(6)}N ${point.position.longitude.toStringAsFixed(6)}E', style: textStyle),
+                  if (address.isNotEmpty) Text(address, style: textStyle),
+                  Text('#$name', style: textStyle),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    ScreenshotController screenshotController = ScreenshotController();
+    Uint8List? capturedBytes = await screenshotController.captureFromWidget(
+      watermarkWidget,
+      delay: const Duration(milliseconds: 500),
+      context: context,
+    );
+
+    final directory = await getApplicationDocumentsDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final savedImage = File('${directory.path}/${name}_$timestamp.jpg');
+    await savedImage.writeAsBytes(capturedBytes ?? bytes);
+    
+    return savedImage;
   }
 
   void _showPointOptions(int index) {
