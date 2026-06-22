@@ -631,7 +631,7 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     Widget watermarkWidget = Directionality(
-      textDirection: TextDirection.ltr,
+      textDirection: ui.TextDirection.ltr,
       child: Container(
         width: targetWidth,
         height: targetHeight,
