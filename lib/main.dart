@@ -1897,6 +1897,8 @@ class _MapScreenState extends State<MapScreen> {
     List<Polyline> redPolylines = [];
     List<Marker> distanceMarkers = [];
     double totalDistance = 0.0;
+    
+    var mainPoints = _points.where((p) => p.branchName == 'Chính').toList();
 
     for (var b in allBranchNames) {
       var bPoints = _points.where((p) => p.branchName == b).toList();
