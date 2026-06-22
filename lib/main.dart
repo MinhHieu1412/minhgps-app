@@ -1743,7 +1743,7 @@ class _MapScreenState extends State<MapScreen> {
             icon: const Icon(Icons.share, color: Colors.white),
             onSelected: (value) {
               if (value == 'csv') _exportToCSV();
-              // if (value == 'kml') _exportToKML();
+              if (value == 'kml') _exportToKMZ();
               if (value == 'dxf') _exportToDXFUI();
               if (value == 'import') _importKML();
               if (value == 'clear') _clearAllPoints();
