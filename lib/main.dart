@@ -124,6 +124,24 @@ class _MapScreenState extends State<MapScreen> {
   String _currentBranch = 'Chính';
   AppMode _currentMode = AppMode.area;
   Offset? _crosshairPos;
+  
+  String? _deviceId;
+  bool _isActivated = false;
+
+  String _generateRandomDeviceId() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    var rnd = math.Random();
+    return String.fromCharCodes(Iterable.generate(6, (_) => chars.codeUnitAt(rnd.nextInt(chars.length))));
+  }
+
+  String _generateActivationCode(String deviceId) {
+    int hash = 0;
+    String input = deviceId + "MINHGPS_VIP_2026";
+    for (int i = 0; i < input.length; i++) {
+      hash = (31 * hash + input.codeUnitAt(i)) & 0x7FFFFFFF;
+    }
+    return (hash % 1000000).toString().padLeft(6, '0');
+  }
 
   @override
   void initState() {
@@ -150,12 +168,27 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     
+    _isActivated = prefs.getBool('is_activated') ?? false;
+    _deviceId = prefs.getString('device_id');
+    if (_deviceId == null) {
+      _deviceId = _generateRandomDeviceId();
+      await prefs.setString('device_id', _deviceId!);
+    }
+
     bool hasSeenTutorial = prefs.getBool('has_seen_tutorial') ?? false;
     if (!hasSeenTutorial) {
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted) {
           _showAboutDialog();
           prefs.setBool('has_seen_tutorial', true);
+        }
+      });
+    }
+
+    if (!_isActivated) {
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) {
+          _showActivationDialog();
         }
       });
     }
@@ -171,6 +204,82 @@ class _MapScreenState extends State<MapScreen> {
         _calculateArea();
       } catch (_) {}
     }
+  }
+
+  void _showActivationDialog() {
+    TextEditingController codeController = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('Kích hoạt bản quyền VIP', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Phần mềm yêu cầu kích hoạt bản quyền để sử dụng đầy đủ tính năng.'),
+                const SizedBox(height: 15),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  color: Colors.grey[200],
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text('Mã thiết bị: $_deviceId', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy, color: Colors.blue),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: _deviceId!));
+                          _showSnackBar('Đã copy Mã thiết bị!');
+                        },
+                      )
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 15),
+                const Text('Vui lòng copy Mã thiết bị và gửi cho Admin để nhận Mã kích hoạt.', style: TextStyle(fontStyle: FontStyle.italic)),
+                const SizedBox(height: 15),
+                TextField(
+                  controller: codeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nhập Mã kích hoạt',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => exit(0),
+                child: const Text('Thoát', style: TextStyle(color: Colors.red)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                onPressed: () async {
+                  String expectedCode = _generateActivationCode(_deviceId!);
+                  if (codeController.text.trim() == expectedCode) {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool('is_activated', true);
+                    setState(() {
+                      _isActivated = true;
+                    });
+                    if (mounted) Navigator.pop(context);
+                    _showSnackBar('Kích hoạt thành công!');
+                  } else {
+                    _showSnackBar('Mã kích hoạt không hợp lệ!');
+                  }
+                },
+                child: const Text('Kích hoạt'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _tryDeleteApk() async {
@@ -565,7 +674,7 @@ class _MapScreenState extends State<MapScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () async {
                       Navigator.pop(context);
-                      _showNotesDialog(index);
+                      _showNoteDialog(index);
                     },
                     icon: const Icon(Icons.note_add),
                     label: const Text('Bảng ghi chú', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
@@ -892,6 +1001,12 @@ class _MapScreenState extends State<MapScreen> {
       kml.writeln('    ]]></description>');
 
       kml.writeln('    <ExtendedData>');
+      kml.writeln('      <Data name="segmentName"><value>${p.segmentName}</value></Data>');
+      kml.writeln('      <Data name="shapeType"><value>${p.shapeType}</value></Data>');
+      if (p.imagePath != null && File(p.imagePath!).existsSync()) {
+        String fileName = p.imagePath!.split('/').last.split('\\').last;
+        kml.writeln('      <Data name="imagePath"><value>images/$fileName</value></Data>');
+      }
       for (int i = 0; i < p.notes.length; i++) {
         if (p.notes[i].trim().isNotEmpty) {
           kml.writeln('      <Data name="GhiChu_${i+1}"><value>${p.notes[i]}</value></Data>');
@@ -1062,13 +1177,15 @@ class _MapScreenState extends State<MapScreen> {
         
         String xmlString = '';
 
+        Map<String, List<int>> extractedImages = {};
         if (fileName.endsWith('.kmz')) {
           final bytes = File(path).readAsBytesSync();
           final archive = ZipDecoder().decodeBytes(bytes);
           for (final file in archive) {
             if (file.name.toLowerCase().endsWith('.kml')) {
               xmlString = utf8.decode(file.content);
-              break;
+            } else if (file.name.toLowerCase().startsWith('images/')) {
+              extractedImages[file.name] = file.content as List<int>;
             }
           }
         } else {
@@ -1097,6 +1214,7 @@ class _MapScreenState extends State<MapScreen> {
         final placemarks = document.findAllElements('Placemark');
         
         List<LandPoint> importedPoints = [];
+        final directory = await getApplicationDocumentsDirectory();
         
         for (var placemark in placemarks) {
           String rawName = placemark.findElements('name').firstOrNull?.innerText ?? 'Điểm';
@@ -1106,6 +1224,37 @@ class _MapScreenState extends State<MapScreen> {
             int openParen = name.lastIndexOf('(');
             branch = name.substring(openParen + 1, name.length - 1);
             name = name.substring(0, openParen).trim();
+          }
+
+          String segmentName = '';
+          String shapeType = 'none';
+          List<String> notes = List.filled(7, '');
+          String? localImagePath;
+
+          var extData = placemark.findElements('ExtendedData').firstOrNull;
+          if (extData != null) {
+            var dataNodes = extData.findElements('Data');
+            for (var data in dataNodes) {
+              var nameAttr = data.getAttribute('name');
+              var value = data.findElements('value').firstOrNull?.innerText ?? '';
+              if (nameAttr == 'segmentName') segmentName = value;
+              else if (nameAttr == 'shapeType') shapeType = value;
+              else if (nameAttr == 'imagePath' && value.isNotEmpty) {
+                if (extractedImages.containsKey(value)) {
+                  final timestamp = DateTime.now().millisecondsSinceEpoch;
+                  final imageName = value.split('/').last;
+                  final savedImage = File('${directory.path}/${timestamp}_$imageName');
+                  await savedImage.writeAsBytes(extractedImages[value]!);
+                  localImagePath = savedImage.path;
+                }
+              }
+              else if (nameAttr != null && nameAttr.startsWith('GhiChu_')) {
+                int? idx = int.tryParse(nameAttr.split('_')[1]);
+                if (idx != null && idx >= 1 && idx <= 7) {
+                  notes[idx - 1] = value;
+                }
+              }
+            }
           }
           
           var pointNodes = placemark.findAllElements('Point');
@@ -1120,6 +1269,10 @@ class _MapScreenState extends State<MapScreen> {
                     position: pt,
                     name: name,
                     branchName: branch,
+                    segmentName: segmentName,
+                    shapeType: shapeType,
+                    notes: notes,
+                    imagePath: localImagePath,
                   ));
                 }
               }
@@ -1141,6 +1294,10 @@ class _MapScreenState extends State<MapScreen> {
                       position: pt,
                       name: '${name}_L$i',
                       branchName: branch,
+                      segmentName: segmentName,
+                      shapeType: shapeType,
+                      notes: notes,
+                      imagePath: localImagePath,
                     ));
                   }
                 }
@@ -1163,6 +1320,10 @@ class _MapScreenState extends State<MapScreen> {
                       position: pt,
                       name: '${name}_P$i',
                       branchName: branch,
+                      segmentName: segmentName,
+                      shapeType: shapeType,
+                      notes: notes,
+                      imagePath: localImagePath,
                     ));
                   }
                 }
@@ -1221,7 +1382,79 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  void _showAdminPanel() {
+    TextEditingController deviceIdController = TextEditingController();
+    String generatedCode = '';
+    
+    showDialog(
+      context: context,
+      builder: (c) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('BẢNG QUẢN TRỊ ADMIN', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Nhập Mã thiết bị (Device ID) của khách hàng để tạo Mã kích hoạt VIP.'),
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: deviceIdController,
+                    decoration: const InputDecoration(
+                      labelText: 'Mã thiết bị của khách',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+                    onPressed: () {
+                      if (deviceIdController.text.trim().isNotEmpty) {
+                        setDialogState(() {
+                          generatedCode = _generateActivationCode(deviceIdController.text.trim());
+                        });
+                      }
+                    },
+                    child: const Text('TẠO MÃ KÍCH HOẠT'),
+                  ),
+                  if (generatedCode.isNotEmpty) ...[
+                    const SizedBox(height: 15),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      color: Colors.yellow[100],
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text('Mã Kích Hoạt:\n$generatedCode', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.red)),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.copy, color: Colors.blue),
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: generatedCode));
+                              _showSnackBar('Đã copy Mã kích hoạt!');
+                            },
+                          )
+                        ],
+                      ),
+                    ),
+                  ]
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(c),
+                  child: const Text('ĐÓNG'),
+                ),
+              ],
+            );
+          }
+        );
+      }
+    );
+  }
+
   void _showAboutDialog() {
+    int adminTapCount = 0;
     showDialog(
       context: context,
       builder: (context) {
@@ -1232,8 +1465,21 @@ class _MapScreenState extends State<MapScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Tác giả:', style: TextStyle(fontSize: 14)),
-                const Text('Vũ Tiến Vĩnh', style: TextStyle(fontSize: 22, color: Colors.green, fontWeight: FontWeight.bold)),
+                GestureDetector(
+                  onTap: () {
+                    adminTapCount++;
+                    if (adminTapCount >= 10) {
+                      adminTapCount = 0;
+                      Navigator.pop(context); // Đóng bảng Hướng dẫn
+                      _showAdminPanel(); // Mở Bảng quản trị
+                    }
+                  },
+                  child: Container(
+                    color: Colors.transparent, // Bắt sự kiện tốt hơn
+                    child: const Text('Tác giả:', style: TextStyle(fontSize: 14)),
+                  ),
+                ),
+                const Text('Vũ Tiến Vĩnh, Lê Minh Hiếu, Trần Văn Đại', style: TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
                 const Text('1. CÁC THAO TÁC CƠ BẢN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blue)),
                 const Text('• Chấm điểm: Chạm vào bản đồ để tạo điểm.\n• Chọn Tỉnh/Thành phố ở góc trên cùng bên phải để xuất hệ tọa độ VN2000 cực chuẩn.', style: TextStyle(fontSize: 13)),
@@ -1497,7 +1743,7 @@ class _MapScreenState extends State<MapScreen> {
             icon: const Icon(Icons.share, color: Colors.white),
             onSelected: (value) {
               if (value == 'csv') _exportToCSV();
-              if (value == 'kml') _exportToKML();
+              // if (value == 'kml') _exportToKML();
               if (value == 'dxf') _exportToDXFUI();
               if (value == 'import') _importKML();
               if (value == 'clear') _clearAllPoints();
