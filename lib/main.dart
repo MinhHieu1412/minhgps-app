@@ -42,6 +42,7 @@ class LandPoint {
   String shapeType;
   List<String> notes;
   String? imagePath;
+  int colorValue;
 
   LandPoint({
     required this.position, 
@@ -51,6 +52,7 @@ class LandPoint {
     this.shapeType = 'none',
     List<String>? notes,
     this.imagePath,
+    this.colorValue = 0xFFF44336, // Colors.red.value
   }) : notes = notes ?? List.filled(7, '');
 
   Map<String, dynamic> toJson() => {
@@ -62,19 +64,19 @@ class LandPoint {
         'shapeType': shapeType,
         'notes': notes,
         'imagePath': imagePath,
+        'colorValue': colorValue,
       };
 
-  factory LandPoint.fromJson(Map<String, dynamic> json) {
-    return LandPoint(
-      position: ll.LatLng(json['lat'], json['lon']),
-      name: json['name'],
-      branchName: json['branchName'] ?? 'Chính',
-      segmentName: json['segmentName'] ?? '',
-      shapeType: json['shapeType'] ?? 'none',
-      notes: json['notes'] != null ? List<String>.from(json['notes']) : List.filled(7, ''),
-      imagePath: json['imagePath'],
-    );
-  }
+  factory LandPoint.fromJson(Map<String, dynamic> json) => LandPoint(
+        position: ll.LatLng(json['lat'], json['lon']),
+        name: json['name'],
+        branchName: json['branchName'] ?? 'Chính',
+        segmentName: json['segmentName'] ?? '',
+        shapeType: json['shapeType'] ?? 'none',
+        notes: json['notes'] != null ? List<String>.from(json['notes']) : List.filled(7, ''),
+        imagePath: json['imagePath'],
+        colorValue: json['colorValue'] ?? (json['branchName'] == 'Chính' ? 0xFFF44336 : 0xFFFFFF00),
+      );
 }
 
 double _calculateBearing(ll.LatLng p1, ll.LatLng p2) {
@@ -127,6 +129,18 @@ class _MapScreenState extends State<MapScreen> {
   String _currentBranch = 'Chính';
   AppMode _currentMode = AppMode.area;
   Offset? _crosshairPos;
+  Color _currentColor = Colors.red;
+
+  final List<Color> _presetColors = [
+    Colors.red,
+    Colors.blue,
+    Colors.green,
+    Colors.yellowAccent,
+    Colors.purple,
+    Colors.orange,
+    Colors.cyan,
+    Colors.white,
+  ];
   
   String? _deviceId;
   bool _isActivated = false;
@@ -468,6 +482,7 @@ class _MapScreenState extends State<MapScreen> {
                     name: nameController.text.trim(),
                     branchName: _currentBranch,
                     segmentName: segmentController.text.trim(),
+                    colorValue: _currentColor.value,
                   ));
                   _calculateArea();
                 });
@@ -902,6 +917,7 @@ class _MapScreenState extends State<MapScreen> {
                       name: firstPointName,
                       branchName: newBranch,
                       segmentName: '', 
+                      colorValue: _currentColor.value,
                     ));
                   });
                   _showSnackBar('Đã bắt đầu nhánh: $newBranch');
@@ -1157,10 +1173,36 @@ class _MapScreenState extends State<MapScreen> {
 
     var archive = Archive();
 
+    String toKmlColor(int colorValue) {
+      String hex = colorValue.toRadixString(16).padLeft(8, '0');
+      String aa = hex.substring(0, 2);
+      String rr = hex.substring(2, 4);
+      String gg = hex.substring(4, 6);
+      String bb = hex.substring(6, 8);
+      return '$aa$bb$gg$rr';
+    }
+
     for (var p in _points) {
       kml.writeln('  <Placemark>');
       kml.writeln('    <name>${p.name} (${p.branchName})</name>');
       
+      kml.writeln('    <Style>');
+      kml.writeln('      <IconStyle>');
+      kml.writeln('        <color>${toKmlColor(p.colorValue)}</color>');
+      kml.writeln('        <scale>1.2</scale>');
+      if (p.shapeType.contains('tròn')) {
+         kml.writeln('        <Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon>');
+      } else if (p.shapeType.contains('vuông')) {
+         kml.writeln('        <Icon><href>http://maps.google.com/mapfiles/kml/shapes/polygon.png</href></Icon>');
+      } else if (p.shapeType.contains('trạm')) {
+         kml.writeln('        <Icon><href>http://maps.google.com/mapfiles/kml/shapes/info-i.png</href></Icon>');
+      } else {
+         kml.writeln('        <Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon>');
+      }
+      kml.writeln('      </IconStyle>');
+      kml.writeln('      <LabelStyle><color>${toKmlColor(p.colorValue)}</color></LabelStyle>');
+      kml.writeln('    </Style>');
+
       kml.writeln('    <description><![CDATA[');
       String notesStr = p.notes.where((n) => n.trim().isNotEmpty).join(', ');
       if (notesStr.isNotEmpty) kml.writeln('      Ghi chú: $notesStr <br/>');
@@ -1175,6 +1217,7 @@ class _MapScreenState extends State<MapScreen> {
       kml.writeln('    <ExtendedData>');
       kml.writeln('      <Data name="segmentName"><value>${p.segmentName}</value></Data>');
       kml.writeln('      <Data name="shapeType"><value>${p.shapeType}</value></Data>');
+      kml.writeln('      <Data name="colorValue"><value>${p.colorValue}</value></Data>');
       if (p.imagePath != null && File(p.imagePath!).existsSync()) {
         String fileName = p.imagePath!.split('/').last.split('\\').last;
         kml.writeln('      <Data name="imagePath"><value>images/$fileName</value></Data>');
@@ -1192,55 +1235,68 @@ class _MapScreenState extends State<MapScreen> {
       kml.writeln('  </Placemark>');
     }
 
-    if (_currentMode == AppMode.area) {
-      var mainPoints = _points.where((p) => p.branchName == 'Chính').toList();
-      if (mainPoints.length >= 3) {
+    var mainPoints = _points.where((p) => p.branchName == 'Chính').toList();
+
+    if (_currentMode == AppMode.area && mainPoints.length >= 3) {
+      kml.writeln('  <Placemark>');
+      kml.writeln('    <name>Mảnh Đất Chính</name>');
+      kml.writeln('    <Style><LineStyle><color>ff0000ff</color><width>2</width></LineStyle><PolyStyle><color>400000ff</color></PolyStyle></Style>');
+      kml.writeln('    <Polygon>');
+      kml.writeln('      <outerBoundaryIs><LinearRing><coordinates>');
+      for (var p in mainPoints) {
+        kml.write('${p.position.longitude},${p.position.latitude},0 ');
+      }
+      kml.write('${mainPoints.first.position.longitude},${mainPoints.first.position.latitude},0');
+      kml.writeln('      </coordinates></LinearRing></outerBoundaryIs>');
+      kml.writeln('    </Polygon>');
+      kml.writeln('  </Placemark>');
+    }
+
+    var allBranches = _points.map((e) => e.branchName).toSet().toList();
+    for (var b in allBranches) {
+      var bPoints = _points.where((p) => p.branchName == b).toList();
+      if (bPoints.length >= 2) {
+        List<LandPoint> linePoints = List.from(bPoints);
+        if (b != 'Chính' && mainPoints.isNotEmpty) {
+           var closest = mainPoints.reduce((curr, next) => 
+               Geolocator.distanceBetween(curr.position.latitude, curr.position.longitude, bPoints.first.position.latitude, bPoints.first.position.longitude) < 
+               Geolocator.distanceBetween(next.position.latitude, next.position.longitude, bPoints.first.position.latitude, bPoints.first.position.longitude) ? curr : next);
+           linePoints.insert(0, closest);
+        }
+
         kml.writeln('  <Placemark>');
-        kml.writeln('    <name>Mảnh Đất Chính</name>');
-        kml.writeln('    <Style><LineStyle><color>ff0000ff</color><width>2</width></LineStyle><PolyStyle><color>400000ff</color></PolyStyle></Style>');
-        kml.writeln('    <Polygon>');
-        kml.writeln('      <outerBoundaryIs><LinearRing><coordinates>');
-        for (var p in mainPoints) {
+        kml.writeln('    <name>${b == 'Chính' ? 'Đường Đo Chính' : 'Nhánh: $b'}</name>');
+        kml.writeln('    <Style><LineStyle><color>${toKmlColor(bPoints.first.colorValue)}</color><width>3</width></LineStyle></Style>');
+        kml.writeln('    <LineString>');
+        kml.writeln('      <coordinates>');
+        for (var p in linePoints) {
           kml.write('${p.position.longitude},${p.position.latitude},0 ');
         }
-        kml.write('${mainPoints.first.position.longitude},${mainPoints.first.position.latitude},0');
-        kml.writeln('      </coordinates></LinearRing></outerBoundaryIs>');
-        kml.writeln('    </Polygon>');
+        kml.writeln('      </coordinates>');
+        kml.writeln('    </LineString>');
         kml.writeln('  </Placemark>');
-      }
 
-      var branchNames = _points.map((e) => e.branchName).toSet().where((b) => b != 'Chính').toList();
-      for (var b in branchNames) {
-        var bPoints = _points.where((p) => p.branchName == b).toList();
-        if (bPoints.length >= 2) {
+        for (int i = 0; i < linePoints.length - 1; i++) {
+          double dist = Geolocator.distanceBetween(
+            linePoints[i].position.latitude, linePoints[i].position.longitude,
+            linePoints[i+1].position.latitude, linePoints[i+1].position.longitude,
+          );
+          double midLat = (linePoints[i].position.latitude + linePoints[i+1].position.latitude) / 2;
+          double midLon = (linePoints[i].position.longitude + linePoints[i+1].position.longitude) / 2;
+          String segName = linePoints[i+1].segmentName;
+          String labelText = '${dist.toStringAsFixed(2)}m';
+          if (segName.isNotEmpty) labelText += ' - $segName';
+
           kml.writeln('  <Placemark>');
-          kml.writeln('    <name>Nhánh: $b</name>');
-          kml.writeln('    <Style><LineStyle><color>ff00ffff</color><width>3</width></LineStyle></Style>');
-          kml.writeln('    <LineString>');
-          kml.writeln('      <coordinates>');
-          for (var p in bPoints) {
-            kml.write('${p.position.longitude},${p.position.latitude},0 ');
-          }
-          kml.writeln('      </coordinates>');
-          kml.writeln('    </LineString>');
-          kml.writeln('  </Placemark>');
-        }
-      }
-    } else if (_currentMode == AppMode.distance) {
-      var allBranches = _points.map((e) => e.branchName).toSet().toList();
-      for (var b in allBranches) {
-        var bPoints = _points.where((p) => p.branchName == b).toList();
-        if (bPoints.length >= 2) {
-          kml.writeln('  <Placemark>');
-          kml.writeln('    <name>${b == 'Chính' ? 'Đường Đo Chính' : 'Nhánh: $b'}</name>');
-          kml.writeln('    <Style><LineStyle><color>${b == 'Chính' ? 'ff0000ff' : 'ff00ffff'}</color><width>3</width></LineStyle></Style>');
-          kml.writeln('    <LineString>');
-          kml.writeln('      <coordinates>');
-          for (var p in bPoints) {
-            kml.write('${p.position.longitude},${p.position.latitude},0 ');
-          }
-          kml.writeln('      </coordinates>');
-          kml.writeln('    </LineString>');
+          kml.writeln('    <name>$labelText</name>');
+          kml.writeln('    <ExtendedData><Data name="isDistanceLabel"><value>true</value></Data></ExtendedData>');
+          kml.writeln('    <Style>');
+          kml.writeln('      <IconStyle><scale>0</scale></IconStyle>');
+          kml.writeln('      <LabelStyle><color>ff00ffff</color><scale>1.0</scale></LabelStyle>');
+          kml.writeln('    </Style>');
+          kml.writeln('    <Point>');
+          kml.writeln('      <coordinates>$midLon,$midLat,0</coordinates>');
+          kml.writeln('    </Point>');
           kml.writeln('  </Placemark>');
         }
       }
@@ -1407,12 +1463,21 @@ class _MapScreenState extends State<MapScreen> {
           String? localImagePath;
 
           var extData = placemark.findElements('ExtendedData').firstOrNull;
+          bool isDistance = false;
+          int colorValue = branch == 'Chính' ? 0xFFF44336 : 0xFFFFFF00;
+
           if (extData != null) {
             var dataNodes = extData.findElements('Data');
             for (var data in dataNodes) {
               var nameAttr = data.getAttribute('name');
               var value = data.findElements('value').firstOrNull?.innerText ?? '';
-              if (nameAttr == 'segmentName') segmentName = value;
+              if (nameAttr == 'isDistanceLabel' && value == 'true') {
+                isDistance = true;
+              }
+              else if (nameAttr == 'colorValue' && value.isNotEmpty) {
+                colorValue = int.tryParse(value) ?? colorValue;
+              }
+              else if (nameAttr == 'segmentName') segmentName = value;
               else if (nameAttr == 'shapeType') shapeType = value;
               else if (nameAttr == 'imagePath' && value.isNotEmpty) {
                 if (extractedImages.containsKey(value)) {
@@ -1432,6 +1497,8 @@ class _MapScreenState extends State<MapScreen> {
             }
           }
           
+          if (isDistance) continue;
+          
           var pointNodes = placemark.findAllElements('Point');
           for (var pointNode in pointNodes) {
             var coordsNode = pointNode.findAllElements('coordinates').firstOrNull;
@@ -1448,6 +1515,7 @@ class _MapScreenState extends State<MapScreen> {
                     shapeType: shapeType,
                     notes: notes,
                     imagePath: localImagePath,
+                    colorValue: colorValue,
                   ));
                 }
               }
@@ -1835,21 +1903,46 @@ class _MapScreenState extends State<MapScreen> {
       if (bPoints.length >= 2) {
         List<ll.LatLng> latLngs = bPoints.map((e) => e.position).toList();
 
+        if (mainPoints.isNotEmpty && bPoints.isNotEmpty) {
+           var closest = mainPoints.reduce((curr, next) => 
+               Geolocator.distanceBetween(curr.position.latitude, curr.position.longitude, bPoints.first.position.latitude, bPoints.first.position.longitude) < 
+               Geolocator.distanceBetween(next.position.latitude, next.position.longitude, bPoints.first.position.latitude, bPoints.first.position.longitude) ? curr : next);
+           latLngs.insert(0, closest.position);
+        }
+
         if (b != 'Chính') {
+          // Find the first segment's color or use the default branch color
+          Color polyColor = Color(bPoints.first.colorValue);
           branchPolylines.add(Polyline(
             points: latLngs,
             strokeWidth: 3.0,
-            color: Colors.yellowAccent,
+            color: polyColor,
           ));
         }
 
         List<ll.LatLng> distanceLinePoints = latLngs;
 
-        redPolylines.add(Polyline(
-          points: distanceLinePoints,
-          strokeWidth: 3.0,
-          color: b == 'Chính' ? Colors.red : Colors.yellowAccent,
-        ));
+        // Draw segments with individual colors
+        for (int i = 0; i < distanceLinePoints.length - 1; i++) {
+          Color segColor = b == 'Chính' ? Colors.red : Colors.yellowAccent;
+          if (i == 0 && distanceLinePoints.length > bPoints.length) {
+            // This is the auto-connect segment from main to branch. Use the branch's first point color.
+            segColor = Color(bPoints.first.colorValue);
+          } else {
+            // Find the point corresponding to distanceLinePoints[i+1]
+            int idx = i;
+            if (distanceLinePoints.length > bPoints.length) idx = i - 1;
+            if (idx >= 0 && idx + 1 < bPoints.length) {
+               segColor = Color(bPoints[idx + 1].colorValue);
+            }
+          }
+
+          redPolylines.add(Polyline(
+            points: [distanceLinePoints[i], distanceLinePoints[i+1]],
+            strokeWidth: 3.0,
+            color: segColor,
+          ));
+        }
 
         for (int i = 0; i < distanceLinePoints.length - 1; i++) {
           double dist = Geolocator.distanceBetween(
@@ -2042,7 +2135,7 @@ class _MapScreenState extends State<MapScreen> {
                           IgnorePointer(
                             child: CustomPaint(
                               size: const Size(100, 100),
-                              painter: ShapePainter(point.shapeType, angle),
+                              painter: ShapePainter(point.shapeType, angle, Color(point.colorValue)),
                             ),
                           ),
                         GestureDetector(
@@ -2060,7 +2153,7 @@ class _MapScreenState extends State<MapScreen> {
                                   children: [
                                     Icon(
                                       Icons.location_on,
-                                      color: isMoving ? Colors.orange : (isBranch ? Colors.yellowAccent : Colors.red),
+                                      color: isMoving ? Colors.orange : Color(point.colorValue),
                                       size: 30,
                                     ),
                                     if (point.notes.any((n) => n.isNotEmpty))
@@ -2186,6 +2279,32 @@ class _MapScreenState extends State<MapScreen> {
                       selectedForegroundColor: Colors.white,
                     ),
                   ),
+                ),
+                const SizedBox(width: 8),
+                PopupMenuButton<Color>(
+                  icon: Icon(Icons.palette, color: _currentColor),
+                  tooltip: 'Chọn Màu Ghi Chú/Dây',
+                  onSelected: (Color color) {
+                    setState(() {
+                      _currentColor = color;
+                    });
+                  },
+                  itemBuilder: (context) {
+                    return _presetColors.map((Color color) {
+                      return PopupMenuItem<Color>(
+                        value: color,
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.grey),
+                          ),
+                        ),
+                      );
+                    }).toList();
+                  },
                 ),
                 const SizedBox(width: 8),
                 FloatingActionButton(
@@ -2375,15 +2494,16 @@ class VN2000Converter {
 class ShapePainter extends CustomPainter {
   final String shapeType;
   final double angle;
+  final Color color;
 
-  ShapePainter(this.shapeType, this.angle);
+  ShapePainter(this.shapeType, this.angle, this.color);
 
   @override
   void paint(Canvas canvas, Size size) {
     if (shapeType == 'none' || shapeType == 'bảng trống') return;
 
     final paint = Paint()
-      ..color = Colors.blue
+      ..color = color
       ..style = PaintingStyle.fill;
     
     final center = Offset(size.width / 2, size.height / 2);
@@ -2422,7 +2542,7 @@ class ShapePainter extends CustomPainter {
       case 'trạm treo':
         final r2 = 12.0; // To gấp 3 lần (bình thường là 4.0)
         final strokePaint = Paint()
-          ..color = Colors.red
+          ..color = color
           ..strokeWidth = 1.5
           ..style = PaintingStyle.stroke;
         
@@ -2431,7 +2551,7 @@ class ShapePainter extends CustomPainter {
         
         // Vẽ tam giác đặc đỏ (cân, đỉnh chạm mép trên, đáy chạm mép dưới)
         final redPaint = Paint()
-          ..color = Colors.red
+          ..color = color
           ..style = PaintingStyle.fill;
         Path path = Path();
         path.moveTo(0, -r2); // Đỉnh chạm mép trên
@@ -2459,6 +2579,6 @@ class ShapePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant ShapePainter oldDelegate) {
-    return oldDelegate.shapeType != shapeType || oldDelegate.angle != angle;
+    return oldDelegate.shapeType != shapeType || oldDelegate.angle != angle || oldDelegate.color != color;
   }
 }
