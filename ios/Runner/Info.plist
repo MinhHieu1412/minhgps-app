@@ -51,5 +51,11 @@
 	<array>
 		<string>comgooglemaps</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ứng dụng cần quyền sử dụng Vị trí để đo tọa độ và diện tích đất.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Ứng dụng cần quyền sử dụng Vị trí liên tục.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ứng dụng cần quyền truy cập Thư viện ảnh để lấy ảnh trạm/cột.</string>
 </dict>
 </plist>
