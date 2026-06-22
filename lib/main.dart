@@ -2072,8 +2072,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
               CurrentLocationLayer(
                 alignPositionOnUpdate: _alignPositionOnUpdate,
-                positionStream: const LocationMarkerDataStreamFactory().defaultPositionStream().handleError((_) {}),
-                headingStream: FlutterCompass.events?.handleError((_) {}).map((CompassEvent e) => LocationMarkerHeading(
+                headingStream: FlutterCompass.events?.map((CompassEvent e) => LocationMarkerHeading(
                   heading: (e.heading ?? 0) * (math.pi / 180),
                   accuracy: (e.accuracy ?? 0) * (math.pi / 180),
                 )),
