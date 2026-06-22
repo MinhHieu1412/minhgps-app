@@ -946,16 +946,93 @@ class _MapScreenState extends State<MapScreen> {
         final file = File(path);
         await file.writeAsString(csvWithBOM);
 
-        List<XFile> shareFiles = [XFile(path)];
+        List<String> shareFiles = [path];
         for (var p in _points) {
           if (p.imagePath != null && File(p.imagePath!).existsSync()) {
-            shareFiles.add(XFile(p.imagePath!));
+            shareFiles.add(p.imagePath!);
           }
         }
 
-        await Share.shareXFiles(shareFiles, text: 'File Excel (CSV) và các ảnh đính kèm dữ liệu đo đạc tại $selectedProvince');
+        await _handleFileExport(shareFiles, 'File Excel (CSV) và các ảnh đính kèm dữ liệu đo đạc tại $selectedProvince');
       }
     });
+  }
+
+  Future<void> _handleFileExport(List<String> paths, String shareText) async {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Xuất file thành công!', style: TextStyle(color: Colors.green)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Bạn muốn làm gì với các file này?'),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.save),
+                label: const Text('Lưu vào điện thoại'),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  if (paths.length == 1) {
+                    String fileName = paths.first.split('/').last.split('\\').last;
+                    Uint8List bytes = await File(paths.first).readAsBytes();
+                    String? result = await FilePicker.platform.saveFile(
+                      dialogTitle: 'Chọn vị trí lưu file',
+                      fileName: fileName,
+                      bytes: bytes,
+                    );
+                    if (result != null) {
+                      _showSnackBar('Đã lưu file thành công!');
+                    }
+                  } else {
+                    String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+                    if (selectedDirectory != null) {
+                      int successCount = 0;
+                      for (String path in paths) {
+                        String fileName = path.split('/').last.split('\\').last;
+                        try {
+                          await File(path).copy('$selectedDirectory/$fileName');
+                          successCount++;
+                        } catch (e) {
+                          // ignore
+                        }
+                      }
+                      _showSnackBar('Đã lưu $successCount file vào thư mục đã chọn!');
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green, 
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 45)
+                ),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.share),
+                label: const Text('Chia sẻ (Zalo, Drive...)'),
+                onPressed: () {
+                  Navigator.pop(context);
+                  Share.shareXFiles(paths.map((p) => XFile(p)).toList(), text: shareText);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent, 
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 45)
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Hủy', style: TextStyle(color: Colors.grey)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _exportToKMZ() async {
@@ -1086,7 +1163,7 @@ class _MapScreenState extends State<MapScreen> {
     final file = File(path);
     await file.writeAsBytes(kmzBytes!);
 
-    await Share.shareXFiles([XFile(path)], text: 'File Google Earth (KMZ) dữ liệu đo đạc ($modeDisplayName)');
+    await _handleFileExport([path], 'File Google Earth (KMZ) dữ liệu đo đạc ($modeDisplayName)');
   }
 
   Future<void> _exportToDXFUI() async {
@@ -1144,7 +1221,10 @@ class _MapScreenState extends State<MapScreen> {
     ) ?? false;
 
     if (proceed) {
-      await exportToDXF(context, _points, selectedProvince);
+      String? path = await exportToDXF(context, _points, selectedProvince);
+      if (path != null) {
+        await _handleFileExport([path], 'Bản vẽ CAD dữ liệu đo đạc tại $selectedProvince');
+      }
     }
   }
 
@@ -1940,23 +2020,7 @@ class _MapScreenState extends State<MapScreen> {
                   );
                 }).toList(),
               ),
-              if (_currentLocation != null)
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: _currentLocation!,
-                      width: 24,
-                      height: 24,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blueAccent,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              // Removed manual marker layer to fix stuck location marker
             ],
           ),
           if (_isLoadingLocation)

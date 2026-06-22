@@ -7,10 +7,10 @@ import 'package:share_plus/share_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import 'main.dart'; 
 
-Future<void> exportToDXF(BuildContext context, List<LandPoint> points, String selectedProvince) async {
+Future<String?> exportToDXF(BuildContext context, List<LandPoint> points, String selectedProvince) async {
   if (points.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chưa có dữ liệu để xuất.')));
-    return;
+    return null;
   }
 
   showDialog(
@@ -190,12 +190,13 @@ EOF
 
     if (context.mounted) Navigator.pop(context); 
 
-    await OpenFilex.open(path);
+    return path;
 
   } catch (e) {
     if (context.mounted) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi xuất DXF: $e')));
     }
+    return null;
   }
 }
