@@ -2037,7 +2037,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
               const PopupMenuItem(
                 value: 'kml',
-                child: Text('🌍 Xuất Google Earth (.kml)'),
+                child: Text('🌍 Xuất Google Earth (.kmz)'),
               ),
             ],
           )
